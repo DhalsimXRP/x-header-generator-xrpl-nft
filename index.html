@@ -1,0 +1,1070 @@
+<!doctype html>
+<html lang="en">
+	<head>
+		<meta charset="UTF-8" />
+		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+		<title>X Header Generator from XRP Ledger NFT</title>
+		<script src="https://cdn.tailwindcss.com"></script>
+		<script src="https://cdn.jsdelivr.net/npm/xrpl@5.0.0/build/xrpl-latest-min.min.js"></script>
+		<style>
+			/* Aspect-ratio fixed responsive configuration to display editing area full without scrollbars */
+			#canvas-container {
+				width: 100%;
+				max-width: 1500px;
+				aspect-ratio: 1500 / 500;
+				position: relative;
+			}
+			#main-canvas {
+				width: 100%;
+				height: 100%;
+				display: block;
+			}
+			/* Scroll area for NFT thumbnail list */
+			.nft-thumb-list {
+				max-height: 260px;
+				overflow-y: auto;
+			}
+			/* Skeleton pulse animation during loading */
+			.skeleton-pulse {
+				animation: pulse 1.5s cubic-bezier(0.4, 0, 0.6, 1) infinite;
+			}
+			@keyframes pulse {
+				0%,
+				100% {
+					opacity: 1;
+				}
+				50% {
+					opacity: 0.4;
+				}
+			}
+		</style>
+	</head>
+	<body class="bg-gray-900 text-gray-100 min-h-screen p-8">
+		<div class="max-w-7xl mx-auto space-y-6">
+			<h1 class="text-2xl font-bold border-b border-gray-700 pb-2">X Header Generator from XRP Ledger NFT</h1>
+			<p class="text-xs text-yellow-500/90 bg-yellow-950/40 border border-yellow-800/50 rounded px-3 py-1.5 mt-2 max-w-fit">⚠️ <strong>Important:</strong> Copyright for NFT images belongs to the creator. Please check with the creator before using this tool.<br />⚠️ <strong>重要:</strong> NFT画像の著作権は製作者に帰属します。このツールをご利用する際は製作者にご確認ください。</p>
+
+			<div class="bg-gray-800 p-4 rounded-lg shadow-md space-y-3">
+				<label class="block text-sm font-medium text-gray-300">XRPL Account Address</label>
+				<div class="flex gap-2">
+					<input type="text" id="address-input" placeholder="Enter address starting with r..." class="flex-1 px-4 py-2 bg-gray-700 border border-gray-600 rounded text-white focus:outline-none focus:border-blue-500" value="" />
+					<button id="fetch-btn" class="px-6 py-2 bg-blue-600 hover:bg-blue-700 rounded font-medium transition">Fetch NFTs</button>
+				</div>
+				<div id="status-message" class="text-sm text-gray-400"></div>
+			</div>
+
+			<div class="bg-gray-800 p-4 rounded-lg shadow-md">
+				<h2 class="text-sm font-medium text-gray-300 mb-3">Owned NFTs (Automatic Metadata Parsing)</h2>
+				<div id="nft-list" class="nft-thumb-list grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-3 p-2 bg-gray-900 rounded border border-gray-700">
+					<p id="list-empty-placeholder" class="text-gray-500 text-sm col-span-full text-center py-4">Please enter an address to fetch your NFTs.</p>
+				</div>
+			</div>
+
+			<div class="bg-gray-800 p-3 rounded-t-lg shadow-md border-b border-gray-700 flex flex-wrap items-center gap-4 text-sm">
+				<div class="flex items-center gap-2">
+					<span class="text-xs text-gray-400">Background:</span>
+					<input type="color" id="bg-color-picker" value="#1e293b" class="w-8 h-8 bg-transparent border-0 cursor-pointer" />
+					<button id="tool-pipette" class="px-2 py-1 bg-gray-700 hover:bg-gray-600 rounded text-xs">Eyedropper (Pick Color)</button>
+				</div>
+
+				<div class="flex items-center gap-1 bg-gray-900 p-1 rounded border border-gray-700">
+					<span class="text-xs text-gray-400 px-1">Selected Image Size:</span>
+					<button id="size-up-btn" class="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-white rounded text-xs font-bold transition">+ Enlarge</button>
+					<button id="size-down-btn" class="px-3 py-1 bg-gray-700 hover:bg-gray-600 text-white rounded text-xs font-bold transition">− Shrink</button>
+					<button id="delete-btn" class="px-2 py-1 bg-red-900 hover:bg-red-800 text-red-200 border border-red-700 rounded text-xs font-medium ml-2">Delete Selected</button>
+				</div>
+
+				<div class="flex items-center gap-1 bg-gray-900 p-1 rounded border border-gray-700">
+					<span class="text-xs text-gray-400 px-1">Grid Guidelines:</span>
+					<button id="grid-center-btn" class="px-2 py-1 bg-gray-700 hover:bg-gray-600 text-white rounded text-xs font-medium transition">Center Cross</button>
+					<button id="grid-100-btn" class="px-2 py-1 bg-gray-700 hover:bg-gray-600 text-white rounded text-xs font-medium transition">100px Grid</button>
+				</div>
+			</div>
+
+			<div class="w-full bg-gray-950 p-2 rounded-b-lg border border-t-0 border-gray-700 shadow-inner flex justify-center">
+				<div id="canvas-container" class="bg-slate-800 shadow-2xl select-none">
+					<canvas id="main-canvas" width="1500" height="500" class="absolute top-0 left-0 z-10"></canvas>
+				</div>
+			</div>
+
+			<div class="flex justify-center pt-2">
+				<button id="save-btn" class="px-8 py-3 bg-green-600 hover:bg-green-700 rounded-lg font-bold text-lg shadow-lg transition transform hover:scale-105">Save PNG</button>
+			</div>
+		</div>
+
+		<script>
+			// --- State Management Variables ---
+			const rpcWssUrl = "wss://xrplcluster.com/";
+			let nfts = [];
+			let canvasObjects = [];
+			let selectedObject = null;
+			let isDrawing = false;
+			let isResizing = false;
+			let resizeHandle = null;
+			let lastX = 0;
+			let lastY = 0;
+
+			// コメント
+			// 🟢 In-memory storage cache map to hold pre-instantiated Image objects
+			const imageCache = new Map();
+
+			// Drag start positions and stickiness mitigation parameters
+			let startX = 0;
+			let startY = 0;
+			let isInitialDrag = true;
+
+			let snapLines = { x: [], y: [] };
+			// Decreased snapping threshold from 15px to 10px to achieve optimal user interaction
+			const SNAP_THRESHOLD = 10;
+			const HANDLE_SIZE = 10;
+
+			// Flags managing active grid layout styles
+			let showCenterGrid = false;
+			let show100Grid = false;
+
+			// Eyedropper activation tool state flag
+			let isPipetteMode = false;
+
+			// --- DOM Elements Declaration ---
+			const addressInput = document.getElementById("address-input");
+			const fetchBtn = document.getElementById("fetch-btn");
+			const statusMessage = document.getElementById("status-message");
+			const nftList = document.getElementById("nft-list");
+			const mainCanvas = document.getElementById("main-canvas");
+			const ctx = mainCanvas.getContext("2d");
+			const bgColorPicker = document.getElementById("bg-color-picker");
+			const saveBtn = document.getElementById("save-btn");
+
+			const toolPipette = document.getElementById("tool-pipette");
+			const deleteBtn = document.getElementById("delete-btn");
+			const sizeUpBtn = document.getElementById("size-up-btn");
+			const sizeDownBtn = document.getElementById("size-down-btn");
+
+			const gridCenterBtn = document.getElementById("grid-center-btn");
+			const grid100Btn = document.getElementById("grid-100-btn");
+
+			// --- Initialization Configurations ---
+			let canvasBackgroundColor = bgColorPicker.value;
+
+			render();
+
+			// --- Core Rendering Logic Area ---
+			function render() {
+				ctx.fillStyle = canvasBackgroundColor;
+				ctx.fillRect(0, 0, mainCanvas.width, mainCanvas.height);
+
+				// Draw guidelines behind canvas elements
+				drawBackgroundGrids();
+
+				canvasObjects.forEach((obj) => {
+					ctx.save();
+					if (obj.type === "image" && obj.img.complete) {
+						ctx.drawImage(obj.img, obj.x, obj.y, obj.w, obj.h);
+
+						// コメント
+						// Draw bounding boxes and corner handles around the actively selected element
+						if (obj === selectedObject) {
+							ctx.strokeStyle = "#3b82f6";
+							ctx.lineWidth = 2;
+							ctx.strokeRect(obj.x, obj.y, obj.w, obj.h);
+
+							ctx.fillStyle = "#ffffff";
+							ctx.strokeStyle = "#3b82f6";
+							ctx.lineWidth = 2;
+
+							const hs = HANDLE_SIZE;
+							ctx.fillRect(obj.x - hs / 2, obj.y - hs / 2, hs, hs);
+							ctx.strokeRect(obj.x - hs / 2, obj.y - hs / 2, hs, hs);
+
+							ctx.fillRect(obj.x + obj.w - hs / 2, obj.y - hs / 2, hs, hs);
+							ctx.strokeRect(obj.x + obj.w - hs / 2, obj.y - hs / 2, hs, hs);
+
+							ctx.fillRect(obj.x - hs / 2, obj.y + obj.h - hs / 2, hs, hs);
+							ctx.strokeRect(obj.x - hs / 2, obj.y + obj.h - hs / 2, hs, hs);
+
+							ctx.fillRect(obj.x + obj.w - hs / 2, obj.y + obj.h - hs / 2, hs, hs);
+							ctx.strokeRect(obj.x + obj.w - hs / 2, obj.y + obj.h - hs / 2, hs, hs);
+						}
+					}
+					ctx.restore();
+				});
+
+				ctx.save();
+				ctx.strokeStyle = "#60a5fa";
+				ctx.lineWidth = 1.5;
+				ctx.setLineDash([6, 4]);
+
+				snapLines.x.forEach((x) => {
+					ctx.beginPath();
+					ctx.moveTo(x, 0);
+					ctx.lineTo(x, mainCanvas.height);
+					ctx.stroke();
+				});
+
+				snapLines.y.forEach((y) => {
+					ctx.beginPath();
+					ctx.moveTo(0, y);
+					ctx.lineTo(mainCanvas.width, y);
+					ctx.stroke();
+				});
+				ctx.restore();
+
+				{
+					/* Synchronized handler monitoring frame buffer re-renders across the bounding context box */
+				}
+			}
+
+			// Background guidelines isolated painting layer
+			function drawBackgroundGrids() {
+				ctx.save();
+
+				// Draw 100px square grid patterns
+				if (show100Grid) {
+					ctx.strokeStyle = "rgba(255, 255, 255, 0.08)";
+					ctx.lineWidth = 1;
+					ctx.setLineDash([]);
+
+					// Vertical grid lines
+					for (let x = 100; x < mainCanvas.width; x += 100) {
+						ctx.beginPath();
+						ctx.moveTo(x, 0);
+						ctx.lineTo(x, mainCanvas.height);
+						ctx.stroke();
+					}
+					// Horizontal grid lines
+					for (let y = 100; y < mainCanvas.height; y += 100) {
+						ctx.beginPath();
+						ctx.moveTo(0, y);
+						ctx.lineTo(mainCanvas.width, y);
+						ctx.stroke();
+					}
+				}
+
+				// Draw center alignment cross hair lines
+				if (showCenterGrid) {
+					ctx.strokeStyle = "rgba(239, 68, 68, 0.4)";
+					ctx.lineWidth = 1.5;
+					ctx.setLineDash([4, 4]);
+
+					// Vertical center guideline
+					ctx.beginPath();
+					ctx.moveTo(mainCanvas.width / 2, 0);
+					ctx.lineTo(mainCanvas.width / 2, mainCanvas.height);
+					ctx.stroke();
+
+					// Horizontal center guideline
+					ctx.beginPath();
+					ctx.moveTo(0, mainCanvas.height / 2);
+					ctx.lineTo(mainCanvas.width, mainCanvas.height / 2);
+					ctx.stroke();
+				}
+
+				ctx.restore();
+			}
+
+			// --- IPFS Gateway URI Resolution Helper ---
+			// 関数エリア
+			function toIpfsGatewayUrl(url, gatewayBase = "https://gateway.pinata.cloud/ipfs/") {
+				if (!url) return "";
+				let resolvedUrl = url.trim();
+
+				// コメント
+				// If resource starts with ipfs:// scheme, replace it using target gateway specifications
+				if (resolvedUrl.startsWith("ipfs://")) {
+					resolvedUrl = resolvedUrl.replace("ipfs://", gatewayBase);
+				}
+				// コメント
+				// If raw CID hash values are specified without explicit protocol, append gateway domain context paths
+				else if (!resolvedUrl.startsWith("http://") && !resolvedUrl.startsWith("https://")) {
+					resolvedUrl = gatewayBase + resolvedUrl;
+				}
+
+				// コメント
+				// Adheres to Xeloc architectural setup: force upgrade insecure http paths to secure https protocols
+				if (resolvedUrl.startsWith("http://")) {
+					resolvedUrl = resolvedUrl.replace("http://", "https://");
+				}
+				return resolvedUrl;
+			}
+
+			// コメント
+			// Replicates Xeloc (vars.ts) fallback chains: iterate through prioritized array of public IPFS nodes
+			async function fetchWithGatewayFallback(ipfsUri) {
+				let lastError = null;
+
+				// コメント
+				// Mirrors identical configuration chains configured under Xeloc's VARS parameters
+				const gateways = [
+					"https://gateway.pinata.cloud/ipfs/", // Primary Endpoint
+					"https://dweb.link/ipfs/", // Fallback Level 1
+					"https://w3s.link/ipfs/", // Fallback Level 2
+					"https://ipfs.io/ipfs/", // Fallback Level 3
+				];
+
+				for (const gateway of gateways) {
+					// Determine sub-domain routing specific to resolving CID v1 format requirements
+					let httpUrl = "";
+					if (gateway.includes("w3s.link") && ipfsUri.startsWith("ipfs://")) {
+						const cid = ipfsUri.replace("ipfs://", "");
+						httpUrl = `https://${cid}.ipfs.w3s.link/`;
+					} else {
+						httpUrl = toIpfsGatewayUrl(ipfsUri, gateway);
+					}
+
+					try {
+						console.log(`[Gateway Try] Running Xeloc fallback chain attempt: ${httpUrl}`);
+						const res = await fetch(httpUrl, { method: "GET" });
+
+						if (res.ok) {
+							return { res, usedGateway: gateway, usedUrl: httpUrl };
+						}
+						lastError = new Error(`Gateway ${gateway} returned status ${res.status}`);
+						console.warn(`[Gateway Failed] Node responded with failure: ${gateway} → ${res.status}`);
+					} catch (e) {
+						lastError = e;
+						console.warn(`[Gateway Error] Communication exception on node: ${gateway}`, e);
+					}
+				}
+				throw lastError || new Error("All fallback gateway nodes defined within Xeloc structures failed to resolve resource.");
+			}
+
+			// --- Async Metadata Parser Layer ---
+			async function resolveNftMetadata(uriStr) {
+				let resolvedImageUrl = null;
+				let resolvedName = null;
+
+				console.log(`[HTTP Fetch] Initializing metadata decoding for URI: ${uriStr}`);
+
+				try {
+					// Execute resource lookup via identical fallback structure patterns inside Xeloc environments
+					const { res, usedGateway, usedUrl } = await fetchWithGatewayFallback(uriStr);
+					const contentType = res.headers.get("content-type") || "";
+					console.log(`[HTTP Fetch Success] Content-Type resolved: ${contentType}`);
+
+					if (contentType.startsWith("image/")) {
+						// コメント
+						// Extract directly if endpoint yields an active binary payload stream matching image profiles
+						resolvedImageUrl = usedUrl;
+					} else {
+						// コメント
+						// Parse structural properties inside payload context maps if initial node responses point to metadata documents
+						const json = await res.json();
+						console.log(`[JSON Parsed] Document contents extracted:`, json);
+
+						resolvedName = json.name || null;
+						const img = json.image || json.video;
+
+						if (img) {
+							console.log(`[JSON Image Found] Found inner asset pointer reference URI: ${img}`);
+							// コメント
+							// Pass down successful path variables to avoid mismatching nested resolution logic routes
+							if (usedGateway.includes("w3s.link") && img.startsWith("ipfs://")) {
+								const cid = img.replace("ipfs://", "");
+								resolvedImageUrl = `https://${cid}.ipfs.w3s.link/`;
+							} else {
+								resolvedImageUrl = toIpfsGatewayUrl(img, usedGateway);
+							}
+						}
+					}
+				} catch (e) {
+					console.warn(`[Resolve Failed] Failed to trace image source through fallback structural models:`, e);
+					if (uriStr.match(/\.(jpeg|jpg|gif|png|svg|webp)/i)) {
+						resolvedImageUrl = toIpfsGatewayUrl(uriStr);
+					}
+				}
+
+				console.log(`[Resolved Final] Terminated image layout path allocation: ${resolvedImageUrl}`);
+				return { imageUrl: resolvedImageUrl, name: resolvedName };
+			}
+
+			function safeHexToUtf8(hex) {
+				if (!hex) return "";
+				const cleanHex = hex.replace(/^0x/i, "");
+				const bytes = new Uint8Array(cleanHex.match(/.{1,2}/g).map((byte) => parseInt(byte, 16)));
+				return new TextDecoder("utf-8").decode(bytes);
+			}
+
+			// --- XRPL Ledger Query Communications Layer ---
+			fetchBtn.addEventListener("click", async () => {
+				const address = addressInput.value.trim();
+				if (!address) {
+					statusMessage.textContent = "Please enter a valid XRPL account address.";
+					return;
+				}
+
+				console.log(`[XRPL Core] Beginning ledger retrieval routine for target address: ${address}`);
+				statusMessage.textContent = "Connecting to XRPL Node endpoint...";
+				nftList.innerHTML = "";
+				nfts = [];
+				// コメント
+				// Flush localized in-memory maps during fresh lookups to prevent leakage scenarios
+				imageCache.clear();
+
+				console.log(`[XRPL Node] Establishing connection streams via: ${rpcWssUrl}`);
+				const client = new xrpl.Client(rpcWssUrl);
+
+				try {
+					await client.connect();
+					console.log(`[XRPL Node Connected] Stream opened. Initializing recursive pagination inquiries...`);
+
+					let marker = undefined;
+					let hasMore = true;
+					let pageCount = 1;
+
+					while (hasMore) {
+						statusMessage.textContent = `Requesting ledger assets (Page ${pageCount})...`;
+						console.log(`[XRPL Page Request] Request data parameters sent for page ${pageCount}, Marker:`, marker);
+
+						const requestPayload = {
+							command: "account_nfts",
+							account: address,
+							ledger_index: "validated",
+						};
+						if (marker) requestPayload.marker = marker;
+
+						const response = await client.request(requestPayload);
+
+						if (response.result && response.result.account_nfts) {
+							const pageNfts = response.result.account_nfts;
+							nfts = nfts.concat(pageNfts);
+							console.log(`[XRPL Page Received] Collected ${pageNfts.length} entries from slice ${pageCount}. Running total: ${nfts.length}`);
+
+							marker = response.result.marker;
+							if (marker) pageCount++;
+							else hasMore = false;
+						} else {
+							console.warn(`[XRPL Warning] Payload formatting constraints detected; exiting retrieval loops.`);
+							hasMore = false;
+						}
+					}
+
+					console.log(`[XRPL Success] Compilation completed. Aggregate ledger tokens identified: ${nfts.length}`);
+					statusMessage.textContent = `Retrieved ${nfts.length} tokens. Setting placeholders and initializing assets...`;
+					prepareSkeletonPlaceholders(nfts.length);
+					displayNFTs();
+				} catch (error) {
+					console.error("[XRPL Connection Error] Interface communication protocols failed:", error);
+					statusMessage.textContent = `An operational failure occurred: ${error.message || error}`;
+					nftList.innerHTML = '<p class="text-red-400 text-sm col-span-full text-center py-4">Failed to establish communications with ledger nodes.</p>';
+				} finally {
+					console.log(`[XRPL Disconnected] Terminating client interface sessions.`);
+					await client.disconnect();
+				}
+			});
+
+			function prepareSkeletonPlaceholders(count) {
+				console.log(`[DOM Build] Compiling ${count} skeleton layouts within container components.`);
+				nftList.innerHTML = "";
+				if (count === 0) {
+					nftList.innerHTML = '<p class="text-gray-500 text-sm col-span-full text-center py-4">No tokens found associated with account parameters.</p>';
+					return;
+				}
+				for (let i = 0; i < count; i++) {
+					const skeleton = document.createElement("div");
+					skeleton.id = `nft-slot-${i}`;
+					skeleton.className = "bg-gray-800 border border-gray-700 rounded aspect-square flex items-center justify-center relative skeleton-pulse";
+					skeleton.innerHTML = '<span class="text-[10px] text-gray-500">Loading...</span>';
+					nftList.appendChild(skeleton);
+				}
+			}
+
+			async function displayNFTs() {
+				console.log(`[Loop Start] Deploying asynchronous workers across structured hex tokens.`);
+				let loadedCount = 0;
+
+				nfts.forEach((nft, index) => {
+					const slot = document.getElementById(`nft-slot-${index}`);
+					if (!slot) return;
+
+					console.log(`[Processing NFT #${index}] TokenID: ${nft.NFTokenID}, HexURI: ${nft.URI || "None"}`);
+
+					if (!nft.URI) {
+						console.log(`[Processing NFT #${index}] URI properties missing; skipping token layout allocation routines.`);
+						slot.classList.remove("skeleton-pulse");
+						slot.innerHTML = '<span class="text-[10px] text-red-500">No URI</span>';
+						return;
+					}
+
+					let decodedUri = "";
+					try {
+						decodedUri = safeHexToUtf8(nft.URI);
+						console.log(`[Decode Success #${index}] String text translated: ${decodedUri}`);
+					} catch (e) {
+						console.error(`[Decode Failed #${index}] Failed to map hex data array streams:`, e);
+						slot.classList.remove("skeleton-pulse");
+						slot.innerHTML = '<span class="text-[10px] text-red-400">Decode Err</span>';
+						return;
+					}
+
+					resolveNftMetadata(decodedUri)
+						.then(({ imageUrl, name }) => {
+							if (!imageUrl) {
+								console.log(`[Mapping Blocked #${index}] Resolution paths empty; bypassing grid allocation.`);
+								slot.classList.remove("skeleton-pulse");
+								slot.innerHTML = '<span class="text-[10px] text-gray-500">No Image</span>';
+								return;
+							}
+
+							// コメント
+							// 🟢 Implemented pre-caching: spin up background image initialization routines to load pixels instantly
+							const preloadedImg = new Image();
+							preloadedImg.crossOrigin = "anonymous";
+							preloadedImg.src = imageUrl;
+							preloadedImg.onload = () => {
+								console.log(`[Preload Cache Saved] Memory spaces updated with asset reference pointers: ${imageUrl}`);
+								imageCache.set(imageUrl, preloadedImg);
+							};
+
+							console.log(`[DOM Mapping #${index}] Applying background attributes into workspace components: ${imageUrl}`);
+							slot.classList.remove("skeleton-pulse");
+							slot.innerHTML = "";
+							slot.className = "bg-gray-800 p-1 rounded border border-gray-700 cursor-pointer hover:border-blue-500 transition aspect-square flex items-center justify-center overflow-hidden bg-cover bg-center relative group";
+							slot.style.backgroundImage = `url('${imageUrl}')`;
+							if (name) slot.title = name;
+
+							if (name) {
+								const label = document.createElement("div");
+								label.className = "absolute bottom-0 left-0 right-0 bg-black/80 text-[10px] p-1 truncate text-center opacity-0 group-hover:opacity-100 transition";
+								label.textContent = name;
+								slot.appendChild(label);
+							}
+
+							slot.addEventListener("click", () => {
+								console.log(`[Canvas Inject] Component selection caught. Initiating context insertions: ${imageUrl}`);
+								addNftToCanvas(imageUrl);
+							});
+
+							loadedCount++;
+							statusMessage.textContent = `Parsed ${loadedCount} asset references into workspace views.`;
+						})
+						.catch((err) => {
+							console.error(`[Promise Error #${index}] Pipeline failure caught while tracking metadata structures:`, err);
+							slot.classList.remove("skeleton-pulse");
+							slot.innerHTML = '<span class="text-[10px] text-red-400">Error</span>';
+						});
+				});
+			}
+
+			// --- Workspace Matrix Operators ---
+			function addNftToCanvas(url) {
+				// コメント
+				// 🟢 Cache validation layer: pass data reference structures directly if memory instances exist
+				if (imageCache.has(url)) {
+					console.log(`[Cache Hit] Deploying active structural layout references from localized maps.`);
+					const cachedImg = imageCache.get(url);
+					injectImageObjectToCanvas(cachedImg);
+				} else {
+					console.log(`[Cache Miss] Missing cached states; initializing network fallbacks...`);
+					const img = new Image();
+					img.crossOrigin = "anonymous";
+					img.src = url;
+					img.onload = function () {
+						imageCache.set(url, img);
+						injectImageObjectToCanvas(img);
+					};
+				}
+			}
+
+			// コメント
+			// 🟢 Separated canvas injection constraints mapping layer to improve performance bounds
+			function injectImageObjectToCanvas(imgObj) {
+				const canvasAspect = mainCanvas.width / mainCanvas.height;
+				const imgAspect = imgObj.width / imgObj.height;
+				let w, h;
+
+				if (imgAspect > canvasAspect) {
+					w = mainCanvas.width * 0.4;
+					h = w / imgAspect;
+				} else {
+					h = mainCanvas.height * 0.6;
+					w = h * imgAspect;
+				}
+
+				const newObj = {
+					type: "image",
+					img: imgObj,
+					x: (mainCanvas.width - w) / 2,
+					y: (mainCanvas.height - h) / 2,
+					w: w,
+					h: h,
+					aspect: imgAspect,
+				};
+
+				canvasObjects.push(newObj);
+				selectedObject = newObj;
+				render();
+			}
+
+			// Step-based sizing adjustment layout tools matching 100px strict parameters
+			function resizeSelectedImage(direction) {
+				if (!selectedObject || selectedObject.type !== "image") return;
+
+				// コメント
+				// 🟢 Modification adjustment layers: round edge variables using 100px grid snapping parameters
+				let currentW = Math.round(selectedObject.w / 100) * 100;
+				if (currentW === 0) currentW = selectedObject.w;
+
+				// Adjust dimensions exactly in steps of 100px
+				let nextW = currentW + 100 * direction;
+				if (nextW < 50) nextW = 50;
+
+				let nextH = nextW / selectedObject.aspect;
+
+				selectedObject.x -= (nextW - selectedObject.w) / 2;
+				selectedObject.y -= (nextH - selectedObject.h) / 2;
+				selectedObject.w = nextW;
+				selectedObject.h = nextH;
+
+				console.log(`[Button Resize] Rounded boundary states mapped utilizing 100px limits. New values: ${nextW}x${nextH}`);
+				render();
+			}
+
+			sizeUpBtn.addEventListener("click", () => resizeSelectedImage(1));
+			sizeDownBtn.addEventListener("click", () => resizeSelectedImage(-1));
+
+			// Toggle triggers managing alignment guideline rendering rules
+			gridCenterBtn.addEventListener("click", () => {
+				showCenterGrid = !showCenterGrid;
+				if (showCenterGrid) {
+					gridCenterBtn.classList.remove("bg-gray-700");
+					gridCenterBtn.classList.add("bg-blue-600");
+				} else {
+					gridCenterBtn.classList.remove("bg-blue-600");
+					gridCenterBtn.classList.add("bg-gray-700");
+				}
+				render();
+			});
+
+			grid100Btn.addEventListener("click", () => {
+				show100Grid = !show100Grid;
+				if (show100Grid) {
+					grid100Btn.classList.remove("bg-gray-700");
+					grid100Btn.classList.add("bg-blue-600");
+				} else {
+					grid100Btn.classList.remove("bg-blue-600");
+					grid100Btn.classList.add("bg-gray-700");
+				}
+				render();
+			});
+
+			function deleteSelectedObject() {
+				if (selectedObject) {
+					console.log(`[Canvas Operation] Element instance purged from active stack traces.`);
+					canvasObjects = canvasObjects.filter((obj) => obj !== selectedObject);
+					selectedObject = null;
+					snapLines = { x: [], y: [] };
+					render();
+				}
+			}
+
+			deleteBtn.addEventListener("click", deleteSelectedObject);
+
+			window.addEventListener("keydown", (e) => {
+				if (document.activeElement === addressInput) return;
+				if (e.key === "Delete" || e.key === "Backspace") deleteSelectedObject();
+			});
+
+			bgColorPicker.addEventListener("input", (e) => {
+				canvasBackgroundColor = e.target.value;
+				render();
+			});
+
+			// Eyedropper state toggle triggers
+			toolPipette.addEventListener("click", () => {
+				isPipetteMode = !isPipetteMode;
+				if (isPipetteMode) {
+					toolPipette.classList.remove("bg-gray-700");
+					toolPipette.classList.add("bg-blue-600");
+					mainCanvas.style.cursor = "crosshair";
+				} else {
+					toolPipette.classList.remove("bg-blue-600");
+					toolPipette.classList.add("bg-gray-700");
+					mainCanvas.style.cursor = "default";
+				}
+			});
+
+			function getHandleAtPosition(obj, mx, my) {
+				if (!obj || obj.type !== "image") return null;
+				const hs = HANDLE_SIZE;
+
+				if (Math.abs(mx - obj.x) <= hs && Math.abs(my - obj.y) <= hs) return "tl";
+				if (Math.abs(mx - (obj.x + obj.w)) <= hs && Math.abs(my - obj.y) <= hs) return "tr";
+				if (Math.abs(mx - obj.x) <= hs && Math.abs(my - (obj.y + obj.h)) <= hs) return "bl";
+				if (Math.abs(mx - (obj.x + obj.w)) <= hs && Math.abs(my - (obj.y + obj.h)) <= hs) return "br";
+
+				return null;
+			}
+
+			// --- Mouse & Touch Input Controller Pipelines ---
+			mainCanvas.addEventListener("mousedown", (e) => {
+				const rect = mainCanvas.getBoundingClientRect();
+				const scaleX = mainCanvas.width / rect.width;
+				const scaleY = mainCanvas.height / rect.height;
+				const mouseX = (e.clientX - rect.left) * scaleX;
+				const mouseY = (e.clientY - rect.top) * scaleY;
+
+				// Handle color tracking operations if pipette state modes are armed
+				if (isPipetteMode) {
+					const imgData = ctx.getImageData(mouseX, mouseY, 1, 1).data;
+					const r = imgData[0].toString(16).padStart(2, "0");
+					const g = imgData[1].toString(16).padStart(2, "0");
+					const b = imgData[2].toString(16).padStart(2, "0");
+					const hexColor = `#${r}${g}${b}`;
+
+					bgColorPicker.value = hexColor;
+					canvasBackgroundColor = hexColor;
+
+					// Return context states back to selection modes after picking color
+					isPipetteMode = false;
+					toolPipette.classList.remove("bg-blue-600");
+					toolPipette.classList.add("bg-gray-700");
+					mainCanvas.style.cursor = "default";
+					render();
+					return;
+				}
+
+				const handle = getHandleAtPosition(selectedObject, mouseX, mouseY);
+				if (handle) {
+					console.log(`[Interaction] Active resize handle target secured: ${handle}`);
+					isResizing = true;
+					resizeHandle = handle;
+					lastX = mouseX;
+					lastY = mouseY;
+					startX = mouseX;
+					startY = mouseY;
+					isInitialDrag = true;
+					return;
+				}
+
+				let found = false;
+				for (let i = canvasObjects.length - 1; i >= 0; i--) {
+					const obj = canvasObjects[i];
+					if (obj.type === "image") {
+						if (mouseX >= obj.x && mouseX <= obj.x + obj.w && mouseY >= obj.y && mouseY <= obj.y + obj.h) {
+							console.log(`[Interaction] Target canvas image element selected.`);
+							selectedObject = obj;
+							found = true;
+							isDrawing = true;
+							lastX = mouseX;
+							lastY = mouseY;
+							startX = mouseX;
+							startY = mouseY;
+							isInitialDrag = true;
+							canvasObjects.push(canvasObjects.splice(i, 1)[0]);
+							break;
+						}
+					}
+				}
+				if (!found) selectedObject = null;
+				render();
+			});
+
+			mainCanvas.addEventListener("mousemove", (e) => {
+				if (isPipetteMode) return;
+
+				const rect = mainCanvas.getBoundingClientRect();
+				const scaleX = mainCanvas.width / rect.width;
+				const scaleY = mainCanvas.height / rect.height;
+				const mouseX = (e.clientX - rect.left) * scaleX;
+				const mouseY = (e.clientY - rect.top) * scaleY;
+
+				if (!isDrawing && !isResizing) {
+					const handle = getHandleAtPosition(selectedObject, mouseX, mouseY);
+					if (handle === "tl" || handle === "br") mainCanvas.style.cursor = "nwse-resize";
+					else if (handle === "tr" || handle === "bl") mainCanvas.style.cursor = "nesw-resize";
+					else mainCanvas.style.cursor = "default";
+				}
+
+				// Snapping stickiness control systems: bypass layout guidelines if movement paths are below 4px bounds
+				if ((isDrawing || isResizing) && isInitialDrag) {
+					const moveDist = Math.sqrt(Math.pow(mouseX - startX, 2) + Math.pow(mouseY - startY, 2));
+					if (moveDist > 4) {
+						isInitialDrag = false;
+					}
+				}
+
+				if (isResizing && selectedObject) {
+					const dx = mouseX - lastX;
+					snapLines = { x: [], y: [] };
+
+					let targetX = [0, mainCanvas.width];
+					let targetY = [0, mainCanvas.height];
+					canvasObjects.forEach((obj) => {
+						if (obj === selectedObject) return;
+						if (obj.type === "image") {
+							targetX.push(obj.x, obj.x + obj.w);
+							targetY.push(obj.y, obj.y + obj.h);
+						}
+					});
+
+					if (!isInitialDrag) {
+						if (showCenterGrid) {
+							targetX.push(mainCanvas.width / 2);
+							targetY.push(mainCanvas.height / 2);
+						}
+						if (show100Grid) {
+							for (let gx = 100; gx < mainCanvas.width; gx += 100) targetX.push(gx);
+							for (let gy = 100; gy < mainCanvas.height; gy += 100) targetY.push(gy);
+						}
+					}
+
+					if (resizeHandle === "br") {
+						let proposedW = selectedObject.w + dx;
+						let proposedH = proposedW / selectedObject.aspect;
+						let currentRight = selectedObject.x + proposedW;
+						let currentBottom = selectedObject.y + proposedH;
+
+						if (!isInitialDrag) {
+							for (let tx of targetX) {
+								if (Math.abs(currentRight - tx) < SNAP_THRESHOLD) {
+									proposedW = tx - selectedObject.x;
+									proposedH = proposedW / selectedObject.aspect;
+									snapLines.x.push(tx);
+									break;
+								}
+							}
+							for (let ty of targetY) {
+								if (Math.abs(currentBottom - ty) < SNAP_THRESHOLD) {
+									proposedH = ty - selectedObject.y;
+									proposedW = proposedH * selectedObject.aspect;
+									snapLines.y.push(ty);
+									break;
+								}
+							}
+						}
+
+						if (proposedW > 20 && proposedH > 20) {
+							selectedObject.w = proposedW;
+							selectedObject.h = proposedH;
+						}
+					} else if (resizeHandle === "bl") {
+						let proposedX = selectedObject.x + dx;
+						let proposedW = selectedObject.x + selectedObject.w - proposedX;
+						let proposedH = proposedW / selectedObject.aspect;
+						let currentBottom = selectedObject.y + proposedH;
+
+						if (!isInitialDrag) {
+							for (let tx of targetX) {
+								if (Math.abs(proposedX - tx) < SNAP_THRESHOLD) {
+									proposedX = tx;
+									proposedW = selectedObject.x + selectedObject.w - proposedX;
+									proposedH = proposedW / selectedObject.aspect;
+									snapLines.x.push(tx);
+									break;
+								}
+							}
+							for (let ty of targetY) {
+								if (Math.abs(currentBottom - ty) < SNAP_THRESHOLD) {
+									proposedH = ty - selectedObject.y;
+									proposedW = proposedH * selectedObject.aspect;
+									proposedX = selectedObject.x + selectedObject.w - proposedW;
+									snapLines.y.push(ty);
+									break;
+								}
+							}
+						}
+
+						if (proposedW > 20 && proposedH > 20) {
+							selectedObject.x = proposedX;
+							selectedObject.w = proposedW;
+							selectedObject.h = proposedH;
+						}
+					} else if (resizeHandle === "tr") {
+						let proposedW = selectedObject.w + dx;
+						let proposedH = proposedW / selectedObject.aspect;
+						let proposedY = selectedObject.y + selectedObject.h - proposedH;
+						let currentRight = selectedObject.x + proposedW;
+
+						if (!isInitialDrag) {
+							for (let tx of targetX) {
+								if (Math.abs(currentRight - tx) < SNAP_THRESHOLD) {
+									proposedW = tx - selectedObject.x;
+									proposedH = proposedW / selectedObject.aspect;
+									proposedY = selectedObject.y + selectedObject.h - proposedH;
+									snapLines.x.push(tx);
+									break;
+								}
+							}
+							for (let ty of targetY) {
+								if (Math.abs(proposedY - ty) < SNAP_THRESHOLD) {
+									proposedY = ty;
+									proposedH = selectedObject.y + selectedObject.h - proposedY;
+									proposedW = proposedH * selectedObject.aspect;
+									snapLines.y.push(ty);
+									break;
+								}
+							}
+						}
+
+						if (proposedW > 20 && proposedH > 20) {
+							selectedObject.y = proposedY;
+							selectedObject.w = proposedW;
+							selectedObject.h = proposedH;
+						}
+					} else if (resizeHandle === "tl") {
+						let proposedX = selectedObject.x + dx;
+						let proposedW = selectedObject.x + selectedObject.w - proposedX;
+						let proposedH = proposedW / selectedObject.aspect;
+						let proposedY = selectedObject.y + selectedObject.h - proposedH;
+
+						if (!isInitialDrag) {
+							for (let tx of targetX) {
+								if (Math.abs(proposedX - tx) < SNAP_THRESHOLD) {
+									proposedX = tx;
+									proposedW = selectedObject.x + selectedObject.w - proposedX;
+									proposedH = proposedW / selectedObject.aspect;
+									proposedY = selectedObject.y + selectedObject.h - proposedH;
+									snapLines.x.push(tx);
+									break;
+								}
+							}
+							for (let ty of targetY) {
+								if (Math.abs(proposedY - ty) < SNAP_THRESHOLD) {
+									proposedY = ty;
+									proposedH = selectedObject.y + selectedObject.h - proposedY;
+									proposedW = proposedH * selectedObject.aspect;
+									proposedX = selectedObject.x + selectedObject.w - proposedW;
+									snapLines.y.push(ty);
+									break;
+								}
+							}
+						}
+
+						if (proposedW > 20 && proposedH > 20) {
+							selectedObject.x = proposedX;
+							selectedObject.y = proposedY;
+							selectedObject.w = proposedW;
+							selectedObject.h = proposedH;
+						}
+					}
+
+					lastX = mouseX;
+					lastY = mouseY;
+					render();
+					return;
+				}
+
+				if (!isDrawing) return;
+
+				if (selectedObject) {
+					const dx = mouseX - lastX;
+					const dy = mouseY - lastY;
+
+					selectedObject.x += dx;
+					selectedObject.y += dy;
+
+					snapLines = { x: [], y: [] };
+
+					// Avoid evaluating positional snaps while mouse tracking distances are beneath breaking ranges
+					if (!isInitialDrag) {
+						let targetX = [0, mainCanvas.width];
+						let targetY = [0, mainCanvas.height];
+
+						canvasObjects.forEach((obj) => {
+							if (obj === selectedObject) return;
+							if (obj.type === "image") {
+								targetX.push(obj.x, obj.x + obj.w);
+								targetY.push(obj.y, obj.y + obj.h);
+							}
+						});
+
+						if (showCenterGrid) {
+							targetX.push(mainCanvas.width / 2);
+							targetY.push(mainCanvas.height / 2);
+						}
+						if (show100Grid) {
+							for (let gx = 100; gx < mainCanvas.width; gx += 100) targetX.push(gx);
+							for (let gy = 100; gy < mainCanvas.height; gy += 100) targetY.push(gy);
+						}
+
+						// Positional snapping evaluation constraints inside X bounds
+						let snappedX = false;
+						for (let tx of targetX) {
+							if (Math.abs(selectedObject.x - tx) < SNAP_THRESHOLD) {
+								selectedObject.x = tx;
+								snapLines.x.push(tx);
+								snappedX = true;
+								break;
+							}
+						}
+						if (!snappedX) {
+							for (let tx of targetX) {
+								if (Math.abs(selectedObject.x + selectedObject.w - tx) < SNAP_THRESHOLD) {
+									selectedObject.x = tx - selectedObject.w;
+									snapLines.x.push(tx);
+									break;
+								}
+							}
+						}
+
+						// Positional snapping evaluation constraints inside Y bounds
+						let snappedY = false;
+						for (let ty of targetY) {
+							if (Math.abs(selectedObject.y - ty) < SNAP_THRESHOLD) {
+								selectedObject.y = ty;
+								snapLines.y.push(ty);
+								snappedY = true;
+								break;
+							}
+						}
+						if (!snappedY) {
+							for (let ty of targetY) {
+								if (Math.abs(selectedObject.y + selectedObject.h - ty) < SNAP_THRESHOLD) {
+									selectedObject.y = ty - selectedObject.h;
+									snapLines.y.push(ty);
+									break;
+								}
+							}
+						}
+					}
+
+					lastX = mouseX;
+					lastY = mouseY;
+					render();
+				}
+			});
+
+			window.addEventListener("mouseup", () => {
+				isDrawing = false;
+				isResizing = false;
+				resizeHandle = null;
+				isInitialDrag = true;
+				snapLines = { x: [], y: [] };
+				if (!isPipetteMode) mainCanvas.style.cursor = "default";
+				render();
+			});
+
+			// --- Export & Download Event Triggers ---
+			saveBtn.addEventListener("click", () => {
+				console.log(`[Canvas Export] Temporarily stripping boundary boxes and guidelines prior to frame conversion...`);
+				const tempSelect = selectedObject;
+				selectedObject = null;
+				snapLines = { x: [], y: [] };
+
+				const tempCenterGrid = showCenterGrid;
+				const temp100Grid = show100Grid;
+				showCenterGrid = false;
+				show100Grid = false;
+
+				render();
+
+				try {
+					const dataUrl = mainCanvas.toDataURL("image/png");
+					const link = document.createElement("a");
+					link.download = "xrpl-nft-header.png";
+					link.href = dataUrl;
+					link.click();
+					console.log(`[Canvas Export Success] Download stream successfully dispatched.`);
+				} catch (err) {
+					alert("A CORS cross-origin configuration block was detected due to security constraints on the external asset host. Please check gateway routing or attempt with a different collection.");
+					console.error(err);
+				}
+
+				selectedObject = tempSelect;
+				showCenterGrid = tempCenterGrid;
+				show100Grid = temp100Grid;
+				render();
+			});
+		</script>
+	</body>
+</html>
