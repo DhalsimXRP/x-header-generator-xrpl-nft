@@ -5,7 +5,7 @@
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 		<title>X Header Generator from XRP Ledger NFT</title>
 		<script src="https://cdn.tailwindcss.com"></script>
-		<script src="https://cdn.jsdelivr.net/npm/xrpl@5.0.0/build/xrpl-latest-min.min.js"></script>
+		<script src="https://cdn.jsdelivr.net/npm/xrpl@5.0.0/build/xrpl-latest-min.js"></script>
 		<script src="https://unpkg.com/lucide@latest"></script>
 		<style>
 			/* Aspect-ratio fixed responsive configuration to display editing area full without scrollbars */
@@ -22,7 +22,7 @@
 			}
 			/* Scroll area for NFT thumbnail list */
 			.nft-thumb-list {
-				max-height: 260px;
+				max-height: 360px;
 				overflow-y: auto;
 			}
 			/* Skeleton pulse animation during loading */
@@ -56,6 +56,11 @@
 
 			<div class="bg-gray-800 p-4 rounded-lg shadow-md">
 				<h2 class="text-sm font-medium text-gray-300 mb-3">Owned NFTs. Clicking a thumbnail adds it to the editing area below.</h2>
+				<div class="mb-3 flex flex-col sm:flex-row sm:items-center gap-2">
+					<label for="nft-search-input" class="text-xs text-gray-400">Search by NFT title</label>
+					<input type="text" id="nft-search-input" placeholder="Enter part of a title..." disabled class="flex-1 px-3 py-2 bg-gray-900 border border-gray-700 rounded text-sm text-white placeholder:text-gray-500 disabled:opacity-50 disabled:cursor-not-allowed focus:outline-none focus:border-blue-500" />
+					<span id="nft-filter-status" class="text-xs text-gray-500 sm:min-w-24"></span>
+				</div>
 				<div id="nft-list" class="nft-thumb-list grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-3 p-2 bg-gray-900 rounded border border-gray-700">
 					<p id="list-empty-placeholder" class="text-gray-500 text-sm col-span-full text-center py-4">Please enter an address to fetch your NFTs.</p>
 				</div>
@@ -85,6 +90,24 @@
 			</div>
 
 			<h2 class="text-xl font-bold">Editing area</h2>
+			<div class="bg-gray-800 p-3 rounded-lg shadow-md border border-gray-700">
+				<div class="flex flex-wrap items-center gap-3">
+					<span class="text-xs text-gray-400">Auto Layout:</span>
+					<button class="auto-layout-btn w-30 bg-gray-900 hover:bg-gray-700 border border-gray-700 hover:border-blue-500 rounded overflow-hidden transition" data-layout="3" title="3 images, 500px squares">
+						<img src="3.png" alt="3 image layout" class="w-full h-full object-cover" />
+					</button>
+					<button class="auto-layout-btn w-30 bg-gray-900 hover:bg-gray-700 border border-gray-700 hover:border-blue-500 rounded overflow-hidden transition" data-layout="12" title="12 images, 250px squares">
+						<img src="12.png" alt="12 image layout" class="w-full h-full object-cover" />
+					</button>
+					<button class="auto-layout-btn w-30 bg-gray-900 hover:bg-gray-700 border border-gray-700 hover:border-blue-500 rounded overflow-hidden transition" data-layout="20" title="20 images, mixed 100px / 200px / 300px squares">
+						<img src="20.png" alt="20 image layout" class="w-full h-full object-cover" />
+					</button>
+					<button class="auto-layout-btn w-30 bg-gray-900 hover:bg-gray-700 border border-gray-700 hover:border-blue-500 rounded overflow-hidden transition" data-layout="75" title="75 images, 100px squares">
+						<img src="75.png" alt="75 image layout" class="w-full h-full object-cover" />
+					</button>
+					<span id="auto-layout-status" class="text-xs text-gray-500"></span>
+				</div>
+			</div>
 
 			<div class="w-full bg-gray-950 p-2 rounded-b-lg border border-t-0 border-gray-700 shadow-inner flex justify-center">
 				<div id="canvas-container" class="bg-slate-800 shadow-2xl select-none">
@@ -100,6 +123,7 @@
 		<script>
 			// --- State Management Variables ---
 			const rpcWssUrl = "wss://xrplcluster.com/";
+			const xrplScriptSources = ["https://cdn.jsdelivr.net/npm/xrpl@5.0.0/build/xrpl-latest-min.js", "https://unpkg.com/xrpl@5.0.0/build/xrpl-latest-min.js", "https://unpkg.com/xrpl/build/xrpl-latest-min.js"];
 			let nfts = [];
 			let canvasObjects = [];
 			let selectedObject = null;
@@ -134,9 +158,13 @@
 			const addressInput = document.getElementById("address-input");
 			const fetchBtn = document.getElementById("fetch-btn");
 			const statusMessage = document.getElementById("status-message");
+			const nftSearchInput = document.getElementById("nft-search-input");
+			const nftFilterStatus = document.getElementById("nft-filter-status");
 			const nftList = document.getElementById("nft-list");
 			const mainCanvas = document.getElementById("main-canvas");
 			const ctx = mainCanvas.getContext("2d");
+			const autoLayoutButtons = document.querySelectorAll(".auto-layout-btn");
+			const autoLayoutStatus = document.getElementById("auto-layout-status");
 			const bgColorPicker = document.getElementById("bg-color-picker");
 			const gridColorPicker = document.getElementById("grid-color-picker");
 			const saveBtn = document.getElementById("save-btn");
@@ -152,6 +180,7 @@
 			// --- Initialization Configurations ---
 			let canvasBackgroundColor = bgColorPicker.value;
 			let rawGridColor = gridColorPicker.value;
+			let nftListItems = [];
 
 			render();
 
@@ -176,7 +205,11 @@
 				canvasObjects.forEach((obj) => {
 					ctx.save();
 					if (obj.type === "image" && obj.img.complete) {
-						ctx.drawImage(obj.img, obj.x, obj.y, obj.w, obj.h);
+						if (obj.crop) {
+							ctx.drawImage(obj.img, obj.crop.sx, obj.crop.sy, obj.crop.sw, obj.crop.sh, obj.x, obj.y, obj.w, obj.h);
+						} else {
+							ctx.drawImage(obj.img, obj.x, obj.y, obj.w, obj.h);
+						}
 
 						// コメント
 						// Draw bounding boxes and corner handles around the actively selected element
@@ -401,6 +434,32 @@
 				return new TextDecoder("utf-8").decode(bytes);
 			}
 
+			function loadScript(src) {
+				return new Promise((resolve, reject) => {
+					const script = document.createElement("script");
+					script.src = src;
+					script.async = true;
+					script.onload = resolve;
+					script.onerror = () => reject(new Error(`Failed to load script: ${src}`));
+					document.head.appendChild(script);
+				});
+			}
+
+			async function ensureXrplLoaded() {
+				if (window.xrpl && window.xrpl.Client) return window.xrpl;
+
+				for (const src of xrplScriptSources) {
+					try {
+						await loadScript(src);
+						if (window.xrpl && window.xrpl.Client) return window.xrpl;
+					} catch (error) {
+						console.warn(`[XRPL Script Load Failed] ${src}`, error);
+					}
+				}
+
+				throw new Error("XRPL library could not be loaded. Please check the CDN/network connection and reload the page.");
+			}
+
 			// --- XRPL Ledger Query Communications Layer ---
 			fetchBtn.addEventListener("click", async () => {
 				const address = addressInput.value.trim();
@@ -413,14 +472,20 @@
 				statusMessage.textContent = "Connecting to XRPL Node endpoint...";
 				nftList.innerHTML = "";
 				nfts = [];
+				nftListItems = [];
+				nftSearchInput.value = "";
+				nftSearchInput.disabled = true;
+				nftFilterStatus.textContent = "";
 				// コメント
 				// Flush localized in-memory maps during fresh lookups to prevent leakage scenarios
 				imageCache.clear();
 
 				console.log(`[XRPL Node] Establishing connection streams via: ${rpcWssUrl}`);
-				const client = new xrpl.Client(rpcWssUrl);
+				let client = null;
 
 				try {
+					const xrplLib = await ensureXrplLoaded();
+					client = new xrplLib.Client(rpcWssUrl);
 					await client.connect();
 					console.log(`[XRPL Node Connected] Stream opened. Initializing recursive pagination inquiries...`);
 
@@ -458,6 +523,7 @@
 					console.log(`[XRPL Success] Compilation completed. Aggregate ledger tokens identified: ${nfts.length}`);
 					statusMessage.textContent = `Retrieved ${nfts.length} tokens. Setting placeholders and initializing assets...`;
 					prepareSkeletonPlaceholders(nfts.length);
+					nftSearchInput.disabled = nfts.length === 0;
 					displayNFTs();
 				} catch (error) {
 					console.error("[XRPL Connection Error] Interface communication protocols failed:", error);
@@ -465,15 +531,23 @@
 					nftList.innerHTML = '<p class="text-red-400 text-sm col-span-full text-center py-4">Failed to establish communications with ledger nodes.</p>';
 				} finally {
 					console.log(`[XRPL Disconnected] Terminating client interface sessions.`);
-					await client.disconnect();
+					if (client && typeof client.disconnect === "function") {
+						try {
+							await client.disconnect();
+						} catch (disconnectError) {
+							console.warn("[XRPL Disconnect Warning] Client cleanup failed:", disconnectError);
+						}
+					}
 				}
 			});
 
 			function prepareSkeletonPlaceholders(count) {
 				console.log(`[DOM Build] Compiling ${count} skeleton layouts within container components.`);
 				nftList.innerHTML = "";
+				nftListItems = [];
 				if (count === 0) {
 					nftList.innerHTML = '<p class="text-gray-500 text-sm col-span-full text-center py-4">No tokens found associated with account parameters.</p>';
+					nftFilterStatus.textContent = "";
 					return;
 				}
 				for (let i = 0; i < count; i++) {
@@ -482,8 +556,38 @@
 					skeleton.className = "bg-gray-800 border border-gray-700 rounded aspect-square flex items-center justify-center relative skeleton-pulse";
 					skeleton.innerHTML = '<span class="text-[10px] text-gray-500">Loading...</span>';
 					nftList.appendChild(skeleton);
+					nftListItems.push({ slot: skeleton, title: "", isDisplayable: false });
+				}
+				applyNftTitleFilter();
+			}
+
+			function applyNftTitleFilter() {
+				const query = nftSearchInput.value.trim().toLowerCase();
+				let totalDisplayable = 0;
+				let visibleCount = 0;
+
+				nftListItems.forEach((item) => {
+					if (!item.slot) return;
+					const matches = !query || item.title.toLowerCase().includes(query);
+					const shouldShow = !item.isDisplayable ? !query : matches;
+					item.slot.classList.toggle("hidden", !shouldShow);
+
+					if (item.isDisplayable) {
+						totalDisplayable++;
+						if (matches) visibleCount++;
+					}
+				});
+
+				if (!totalDisplayable) {
+					nftFilterStatus.textContent = "";
+				} else if (query) {
+					nftFilterStatus.textContent = `${visibleCount} / ${totalDisplayable}`;
+				} else {
+					nftFilterStatus.textContent = `${totalDisplayable} shown`;
 				}
 			}
+
+			nftSearchInput.addEventListener("input", applyNftTitleFilter);
 
 			async function displayNFTs() {
 				console.log(`[Loop Start] Deploying asynchronous workers across structured hex tokens.`);
@@ -528,8 +632,9 @@
 							preloadedImg.crossOrigin = "anonymous";
 							preloadedImg.src = imageUrl;
 							preloadedImg.onload = () => {
-								console.log(`[Preload Cache Saved] Memory spaces updated with asset reference pointers: ${imageUrl}`);
-								imageCache.set(imageUrl, preloadedImg);
+								const resized = resizeImageForCache(preloadedImg);
+								console.log(`[Preload Cache Saved] Cached (${resized.width}x${resized.height}): ${imageUrl}`);
+								imageCache.set(imageUrl, resized);
 							};
 
 							console.log(`[DOM Mapping #${index}] Applying background attributes into workspace components: ${imageUrl}`);
@@ -538,6 +643,7 @@
 							slot.className = "bg-gray-800 p-1 rounded border border-gray-700 cursor-pointer hover:border-blue-500 transition aspect-square flex items-center justify-center overflow-hidden bg-cover bg-center relative group";
 							slot.style.backgroundImage = `url('${imageUrl}')`;
 							if (name) slot.title = name;
+							nftListItems[index] = { slot, title: name || "", imageUrl, isDisplayable: true };
 
 							if (name) {
 								const label = document.createElement("div");
@@ -553,6 +659,7 @@
 
 							loadedCount++;
 							statusMessage.textContent = `Parsed ${loadedCount} asset references into workspace views.`;
+							applyNftTitleFilter();
 						})
 						.catch((err) => {
 							console.error(`[Promise Error #${index}] Pipeline failure caught while tracking metadata structures:`, err);
@@ -562,23 +669,42 @@
 				});
 			}
 
+			// --- Cache Resize Helper ---
+			// 🟢 短辺が1500pxを超える画像をオフスクリーンCanvasで縮小し、メモリ消費を抑制する
+			const CACHE_SHORT_SIDE = 1500;
+			function resizeImageForCache(img) {
+				const shortSide = Math.min(img.width, img.height);
+				if (shortSide <= CACHE_SHORT_SIDE) return img;
+
+				const scale = CACHE_SHORT_SIDE / shortSide;
+				const newW = Math.round(img.width * scale);
+				const newH = Math.round(img.height * scale);
+
+				const offscreen = document.createElement("canvas");
+				offscreen.width = newW;
+				offscreen.height = newH;
+				const offCtx = offscreen.getContext("2d");
+				offCtx.drawImage(img, 0, 0, newW, newH);
+
+				const resizedImg = new Image();
+				try {
+					resizedImg.src = offscreen.toDataURL();
+					console.log(`[Resize Cache] ${img.width}x${img.height} → ${newW}x${newH}`);
+					return resizedImg;
+				} catch (error) {
+					console.warn("[Resize Cache Warning] Falling back to the original image:", error);
+					return img;
+				}
+			}
+
 			// --- Workspace Matrix Operators ---
-			function addNftToCanvas(url) {
-				// コメント
-				// 🟢 Cache validation layer: pass data reference structures directly if memory instances exist
-				if (imageCache.has(url)) {
-					console.log(`[Cache Hit] Deploying active structural layout references from localized maps.`);
-					const cachedImg = imageCache.get(url);
-					injectImageObjectToCanvas(cachedImg);
-				} else {
-					console.log(`[Cache Miss] Missing cached states; initializing network fallbacks...`);
-					const img = new Image();
-					img.crossOrigin = "anonymous";
-					img.src = url;
-					img.onload = function () {
-						imageCache.set(url, img);
-						injectImageObjectToCanvas(img);
-					};
+			async function addNftToCanvas(url) {
+				try {
+					const img = await getCachedImage(url);
+					injectImageObjectToCanvas(img);
+				} catch (error) {
+					console.error("[Canvas Inject Error] Failed to prepare image:", error);
+					statusMessage.textContent = "Failed to load the selected NFT image.";
 				}
 			}
 
@@ -611,6 +737,135 @@
 				selectedObject = newObj;
 				render();
 			}
+
+			function shuffleArray(items) {
+				const shuffled = [...items];
+				for (let i = shuffled.length - 1; i > 0; i--) {
+					const j = Math.floor(Math.random() * (i + 1));
+					[shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+				}
+				return shuffled;
+			}
+
+			function buildAutoLayoutSlots(layoutType) {
+				const slots = [];
+
+				if (layoutType === "3") {
+					for (let i = 0; i < 3; i++) slots.push({ x: i * 500, y: 0, size: 500 });
+				} else if (layoutType === "12") {
+					for (let y = 0; y < mainCanvas.height; y += 250) {
+						for (let x = 0; x < mainCanvas.width; x += 250) {
+							slots.push({ x, y, size: 250 });
+						}
+					}
+				} else if (layoutType === "20") {
+					slots.push({ x: 0, y: 0, size: 300 }, { x: 600, y: 0, size: 300 }, { x: 1200, y: 0, size: 300 }, { x: 300, y: 200, size: 300 }, { x: 900, y: 200, size: 300 }, { x: 400, y: 0, size: 200 }, { x: 1000, y: 0, size: 200 }, { x: 0, y: 300, size: 200 }, { x: 600, y: 300, size: 200 }, { x: 1200, y: 300, size: 200 }, { x: 300, y: 0, size: 100 }, { x: 300, y: 100, size: 100 }, { x: 200, y: 300, size: 100 }, { x: 200, y: 400, size: 100 }, { x: 900, y: 0, size: 100 }, { x: 900, y: 100, size: 100 }, { x: 800, y: 300, size: 100 }, { x: 800, y: 400, size: 100 }, { x: 1400, y: 300, size: 100 }, { x: 1400, y: 400, size: 100 });
+				} else if (layoutType === "75") {
+					for (let y = 0; y < mainCanvas.height; y += 100) {
+						for (let x = 0; x < mainCanvas.width; x += 100) {
+							slots.push({ x, y, size: 100 });
+						}
+					}
+				}
+
+				return slots;
+			}
+
+			function pickRandomNftItems(count) {
+				const availableItems = nftListItems.filter((item) => item.isDisplayable && item.imageUrl);
+				if (availableItems.length === 0) return [];
+
+				if (availableItems.length >= count) {
+					return shuffleArray(availableItems).slice(0, count);
+				}
+
+				const picked = [];
+				while (picked.length < count) {
+					picked.push(...shuffleArray(availableItems));
+				}
+				return picked.slice(0, count);
+			}
+
+			function waitForImageReady(img) {
+				if (img.complete && img.naturalWidth > 0) return Promise.resolve(img);
+				return new Promise((resolve, reject) => {
+					img.onload = () => resolve(img);
+					img.onerror = () => reject(new Error("Failed to load NFT image."));
+				});
+			}
+
+			async function getCachedImage(url) {
+				if (imageCache.has(url)) {
+					return waitForImageReady(imageCache.get(url));
+				}
+
+				const img = new Image();
+				img.crossOrigin = "anonymous";
+				img.src = url;
+				await waitForImageReady(img);
+				const resized = resizeImageForCache(img);
+				imageCache.set(url, resized);
+				return waitForImageReady(resized);
+			}
+
+			function getSquareCrop(img) {
+				const sourceW = img.naturalWidth || img.width;
+				const sourceH = img.naturalHeight || img.height;
+				const side = Math.min(sourceW, sourceH);
+				return {
+					sx: (sourceW - side) / 2,
+					sy: (sourceH - side) / 2,
+					sw: side,
+					sh: side,
+				};
+			}
+
+			async function applyAutoLayout(layoutType) {
+				const slots = shuffleArray(buildAutoLayoutSlots(layoutType));
+				if (slots.length === 0) return;
+
+				const pickedItems = pickRandomNftItems(slots.length);
+				if (pickedItems.length === 0) {
+					autoLayoutStatus.textContent = "Load NFTs first.";
+					return;
+				}
+
+				autoLayoutStatus.textContent = "Applying layout...";
+
+				try {
+					const nextObjects = await Promise.all(
+						slots.map(async (slot, index) => {
+							const item = pickedItems[index];
+							const img = await getCachedImage(item.imageUrl);
+							return {
+								type: "image",
+								img,
+								x: slot.x,
+								y: slot.y,
+								w: slot.size,
+								h: slot.size,
+								aspect: 1,
+								crop: getSquareCrop(img),
+							};
+						}),
+					);
+
+					canvasObjects = nextObjects;
+					selectedObject = null;
+					snapLines = { x: [], y: [] };
+					autoLayoutStatus.textContent = `Applied ${slots.length} images.`;
+					render();
+				} catch (error) {
+					console.error("[Auto Layout Error]", error);
+					autoLayoutStatus.textContent = "Auto layout failed.";
+				}
+			}
+
+			autoLayoutButtons.forEach((button) => {
+				button.addEventListener("click", () => {
+					applyAutoLayout(button.dataset.layout);
+				});
+			});
 
 			// Step-based sizing adjustment layout tools matching 100px strict parameters
 			function resizeSelectedImage(direction) {
